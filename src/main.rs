@@ -3,9 +3,12 @@ use std::time::Duration;
 use std::net::{Incoming, SocketAddr, TcpListener, TcpStream};
 use std::io::prelude;
 use std::io::Write;
-mod gossip;
-use gossip::{Server, Content};
-use serde::{Serialize, Deserialize};
+
+mod server;
+use server::Server;
+mod message;
+use message::Message;
+
 
 fn main() {
     // Create a new Server
@@ -26,13 +29,16 @@ fn main() {
     thread::sleep(Duration::from_millis(1000));
 
     // Send message to Server
+    let mut digest = String::from("");
     for i in 0..10000 {
         if let Ok(mut stream) = TcpStream::connect("localhost:8080") {
-            //println!("Client #{} connected to the server!", i);
-            let content = Content::new(i, "hello".to_string());
-            let serialized = serde_json::to_string(&content).unwrap();
-
-            stream.write(serialized.as_bytes());
+            let content = Message::generate_random_string();
+            let digest_input = digest + &content;
+            digest = Message::generate_digest(&digest_input);
+            let message = Message::new(i, content);
+            println!("Client send message: nonce={}, bytes={}, digest={}", message.nonce,
+                     message.bytes, digest);
+            stream.write(message.serialize().as_bytes());
             //stream.flush().unwrap();
         } else {
             println!("Client #{} couldn't connect to server...", i);
