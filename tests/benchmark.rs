@@ -27,7 +27,7 @@ mod tests {
         });
 
         // Sleep 1 second
-        thread::sleep(Duration::from_millis(1000));
+        //thread::sleep(Duration::from_millis(1000));
 
         // Send message to Server
         let mut digest = String::from("");
@@ -40,7 +40,7 @@ mod tests {
                 println!("Client send message: nonce={}, bytes={}, digest={}", message.nonce,
                          message.bytes, digest);
                 stream.write(message.serialize().as_bytes());
-                //stream.flush().unwrap();
+                stream.flush().unwrap();
             } else {
                 println!("Client #{} couldn't connect to server...", i);
             }
