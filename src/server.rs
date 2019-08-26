@@ -46,6 +46,35 @@ impl Listener {
     }
 }
 
+struct Broadcaster {
+    receivers: Vec<SocketAddr>,
+    fan_out: u8
+}
+
+impl Broadcaster {
+    pub fn new(receivers: Vec<SocketAddr>) -> Broadcaster {
+        Broadcaster{
+            receivers,
+            fan_out: 3
+        }
+    }
+
+    pub fn broadcast (&self, message: String) {
+        let mut counter = 0;
+        for i in &self.receivers {
+            if counter >= self.fan_out {
+                break;
+            }
+            if let Ok(mut stream) = TcpStream::connect(i) {
+                stream.write(message.as_bytes());
+            } else {
+                println!("Client #{} couldn't connect to server...", i);
+            }
+            counter += 1;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Peer {
     address: SocketAddr
@@ -66,10 +95,8 @@ impl Peer {
 pub struct Server {
     address: SocketAddr,
     peers: Vec<Peer>,
-    fan_out: u8,
     messages: HashMap<u32, String>,
     digests: HashMap<u32, String>,
-    message_num: usize,
     sender: Sender<String>,
     receiver: Receiver<String>
 }
@@ -83,10 +110,8 @@ impl Server {
         Server {
             address,
             peers: Vec::new(),
-            fan_out: 3,
             messages: HashMap::new(),
             digests: HashMap::new(),
-            message_num: 0,
             sender,
             receiver
         }
@@ -109,15 +134,21 @@ impl Server {
             if self.messages.contains_key(&index) {
                 // already exist, do nothing
             } else {
-                // step 1
+                // step 1: broadcast the message
                 let broadcast_message = message.clone();
-                self.broadcast(broadcast_message.serialize());
+                let mut receivers = Vec::new();
+                for i in &self.peers {
+                    receivers.push(i.address);
+                }
+                thread::spawn(move || {
+                    Broadcaster::new(receivers)
+                        .broadcast(broadcast_message.serialize());
+                });
 
                 // step 2
                 self.messages.insert(index, message.bytes);
 
                 // step 3
-                //self.generate_digest(index);
                 if index == 0 {
                     let digest_input = self.messages.get(&index).unwrap();
                     self.digests.insert(0,Message::generate_digest(digest_input));
@@ -147,20 +178,6 @@ impl Server {
         }
     }
 
-    fn broadcast (&self, message: String) {
-        let mut counter = 0;
-        for i in &self.peers {
-            if counter >= self.fan_out {
-                break;
-            }
-            if let Ok(mut stream) = TcpStream::connect(i.address) {
-                stream.write(message.as_bytes());
-            } else {
-                println!("Client #{} couldn't connect to server...", i.address);
-            }
-            counter += 1;
-        }
-    }
     pub fn join(&mut self, address: &String) {
         let peer = Peer::new(address.to_string());
         self.peers.push(peer);
