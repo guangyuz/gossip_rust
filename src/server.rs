@@ -6,6 +6,7 @@ use std::time::Duration;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::collections::HashMap;
 
+use time::*;
 use crate::message::Message;
 
 struct Listener {
@@ -74,8 +75,8 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(server_details: String) -> Server {
-        let address: SocketAddr = server_details
+    pub fn new(server_details: &String) -> Server {
+        let address: SocketAddr = server_details.to_string()
             .parse()
             .expect("Unable to parse socket address");
         let (sender, receiver) = channel();
@@ -100,6 +101,7 @@ impl Server {
             Listener::new(address, stream_sender).run();
         });
 
+        let start_time = time::get_time();
         // Main loop of the server
         for content in self.receiver.iter() {
             let mut message: Message = Message::deserialize(content);
@@ -112,10 +114,7 @@ impl Server {
                 self.broadcast(broadcast_message.serialize());
 
                 // step 2
-                println!("Server {} received message: nonce={}, bytes={}", self.address, message.nonce,
-                         message.bytes);
                 self.messages.insert(index, message.bytes);
-
 
                 // step 3
                 //self.generate_digest(index);
@@ -136,8 +135,8 @@ impl Server {
                         let digest_input = last_digest + current.unwrap();
                         let digest = Message::generate_digest(&digest_input);
                         self.digests.insert(index, digest.clone());
-                        println!("Server {} message: nonce={}, digest={}",
-                                 self.address, index, digest);
+                        println!("Server {}, {:?}, message: nonce={}, bytes={}, digest={}",
+                                 self.address, time::get_time() - start_time, index, current.unwrap(), digest);
                         index += 1;
                         last = current;
                         last_digest = digest;
@@ -162,8 +161,8 @@ impl Server {
             counter += 1;
         }
     }
-    pub fn join(&mut self, address: String) {
-        let peer = Peer::new(address);
+    pub fn join(&mut self, address: &String) {
+        let peer = Peer::new(address.to_string());
         self.peers.push(peer);
     }
 
