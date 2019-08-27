@@ -132,49 +132,26 @@ impl Server {
             let mut message: Message = Message::deserialize(content);
             let mut index = message.nonce;
             if self.messages.contains_key(&index) {
-                // already exist, do nothing
-            } else {
-                // step 1: broadcast the message
-                let broadcast_message = message.clone();
-                let mut receivers = Vec::new();
-                for i in &self.peers {
-                    receivers.push(i.address);
-                }
-                thread::spawn(move || {
-                    Broadcaster::new(receivers)
-                        .broadcast(broadcast_message.serialize());
-                });
-
-                // step 2
-                self.messages.insert(index, message.bytes);
-
-                // step 3
-                if index == 0 {
-                    let digest_input = self.messages.get(&index).unwrap();
-                    self.digests.insert(0,Message::generate_digest(digest_input));
-                } else {
-                    let mut current = self.messages.get(&index);
-                    let mut last = self.messages.get(&(index - 1));
-                    //let current_digest = self.digests.get(&(index));
-                    let mut last_digest =  String::new();
-                    let last_digest_is_some = self.digests.get(&(index - 1)).is_some();
-                    if last_digest_is_some {
-                        last_digest = String::from(self.digests.get(&(index - 1)).unwrap());
-                    }
-
-                    while last.is_some() && last_digest_is_some && current.is_some() {
-                        let digest_input = last_digest + current.unwrap();
-                        let digest = Message::generate_digest(&digest_input);
-                        self.digests.insert(index, digest.clone());
-                        println!("Server {}, {:?}, message: nonce={}, bytes={}, digest={}",
-                                 self.address, time::get_time() - start_time, index, current.unwrap(), digest);
-                        index += 1;
-                        last = current;
-                        last_digest = digest;
-                        current = self.messages.get(&index);
-                    }
-                }
+                continue; // already exist, do nothing
             }
+            // step 1: broadcast the message
+            let broadcast_message = message.clone();
+            let mut receivers = Vec::new();
+            for i in &self.peers {
+                receivers.push(i.address);
+            }
+            thread::spawn(move || {
+                Broadcaster::new(receivers)
+                    .broadcast(broadcast_message.serialize());
+            });
+
+            // step 2: save the message
+            println!("Server {}, {:?}, message: nonce={}, bytes={}",
+                     self.address, time::get_time() - start_time, index, message.bytes);
+            self.messages.insert(index, message.bytes);
+
+            // step 3: generate cumulative hash for the accepted messages
+            Message::generate_cumulative_hash(&self.messages, &mut self.digests, index);
         }
     }
 

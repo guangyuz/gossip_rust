@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use rand::{thread_rng, Rng};
 use rand::distributions::Alphanumeric;
 use serde::{Serialize, Deserialize};
@@ -42,6 +43,31 @@ impl Message {
         let mut hasher = Sha256::new();
         hasher.input_str(input);
         hasher.result_str()
+    }
+
+    pub fn generate_cumulative_hash(messages: &HashMap<u32, String>, digests: &mut HashMap<u32, String>, mut index: u32){
+        let mut current;
+        let mut last_digest = None;
+        if index == 0 {
+            last_digest = Some(String::from(""));
+            current = messages.get(&0);
+        } else {
+            current = messages.get(&index);
+            if let Some(v) = digests.get(&(index - 1)) {
+                last_digest = Some(String::from(v));
+            }
+        }
+
+        while last_digest.is_some() && current.is_some() {
+            let digest_input = last_digest.unwrap() + current.unwrap();
+            let digest = Message::generate_digest(&digest_input);
+            digests.insert(index, digest.clone());
+            println!("Server generate digest for message: nonce={}, digest={}",
+                     index, digest);
+            index += 1;
+            last_digest = Some(digest);
+            current = messages.get(&index);
+        }
     }
 }
 
