@@ -32,7 +32,7 @@ mod tests {
         // Send message to Server
         let mut digest = String::from("");
         for i in 0..1000 {
-            if let Ok(mut stream) = TcpStream::connect("localhost:8080") {
+            if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
                 let content = Message::generate_random_string();
                 let digest_input = digest + &content;
                 digest = Message::generate_digest(&digest_input);
