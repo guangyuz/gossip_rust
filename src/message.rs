@@ -8,15 +8,15 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message{
-    pub nonce: u32,
-    pub bytes: String,
+    pub nonce: u32, //continuous integer
+    pub bytes: String, //random string
 }
 
 impl Message {
     pub fn new(nonce: u32, bytes: String) -> Message {
         Message{
             nonce,
-            bytes
+            bytes,
         }
     }
 

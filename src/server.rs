@@ -51,6 +51,7 @@ pub struct Shared {
     digests: HashMap<u32, String>,
 }
 
+// in memory storage for received message
 impl Shared {
     fn new() -> Self {
         Shared {
@@ -76,10 +77,13 @@ impl Server {
         }
     }
 
+    // running in a standalone task and communicate with main task with (tx, rx)
+    // send message to one random selected peer
     fn broadcast_task(rx: Receiver<String>, broadcaster: Broadcaster)
         -> impl Future<Item = (), Error = ()>
     {
         rx.filter(|msg| msg.ne("please ignore")).for_each(move |msg| {
+            // random select one receiver from peer list
             let target = thread_rng().gen_range(0, broadcaster.receivers.len());
             let addr = broadcaster.receivers[target];
             TcpStream::connect(&addr)
@@ -95,6 +99,8 @@ impl Server {
         })
     }
 
+    // cumulative hash for each message
+    // current_digest = sha256(last_digest + current_message_content)
     fn generate_cumulative_hash(state: Arc<Mutex<Shared>>, mut index: u32){
         let mut current = None;
         let mut last_digest = None;
@@ -127,6 +133,8 @@ impl Server {
         }
     }
 
+    // task to process received message
+    // sort with nonce(continuous integer), generate cumulative hash for each message
     fn process(socket: TcpStream, tx: Sender<String>, state: Arc<Mutex<Shared>>) {
         let done = io::read_to_end(socket, vec![])
             .and_then(move |(_, buf)| {
@@ -152,6 +160,11 @@ impl Server {
         tokio::spawn(done);
     }
 
+    // Main task of the server
+    //
+    // message data flow:
+    // run(listener) -> process(sort, hash) -> broadcast_task
+    //
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let address = self.address;
         let peers = &self.peers;
@@ -178,6 +191,8 @@ impl Server {
         Ok(())
     }
 
+    // join a network, address could be a single ip address or a list of ip address
+    // list members are distinguished by semicolons
     pub fn join(&mut self, address: &String) {
         let addrs: Vec<&str> = address.split(';').collect();
         for addr in addrs {

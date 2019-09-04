@@ -1,5 +1,7 @@
 # gossip_rust
 
+
+
 How to use? 
 
 1.Below example shows how to setup a three nodes network and send message
@@ -21,7 +23,7 @@ last, start client in a new terminal,which will send 1000 random messages to ser
 
 
 2.If you don't want to lunch servers one by one, there are also some 
-codes in the 'tests' folder, you can lunch multiple servers directly.
+codes in the 'tests' folder, you can lunch multiple servers directly.  
   lunch_2_servers.rs,  
   lunch_3_servers.rs,  
   lunch_10_servers.rs,  
