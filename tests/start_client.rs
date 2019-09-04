@@ -5,33 +5,26 @@ mod tests {
     use std::net::{Incoming, SocketAddr, TcpListener, TcpStream};
     use std::io::prelude;
     use std::io::Write;
+    use std::env;
 
     extern crate gossiprust;
     use gossiprust::server::Server;
     use gossiprust::message::Message;
 
     #[test]
-    fn two_nodes() {
-        // Create a new Server
-        let mut server_A = Server::new(&"127.0.0.1:8080".to_string());
-        server_A.join(&"127.0.0.1:8081".to_string());
-        let mut server_B = Server::new(&"127.0.0.1:8081".to_string());
-        server_B.join(&"127.0.0.1:8080".to_string());
+    fn client() {
 
-        // Start server in new thread
-        let handle_A = thread::spawn(move || {
-            server_A.run();
-        });
-        let handle_B = thread::spawn(move || {
-            server_B.run();
-        });
-
-        // Sleep 1 second
-        //thread::sleep(Duration::from_millis(1000));
+        let mut total_msg = 1000;
+        let args: Vec<String> = env::args().collect();
+        if args.len() < 2 {
+            println!("too few arguments, use default msg# value: 1000");
+        } else {
+            //total_msg = *&args[1].parse::<u32>().unwrap();
+        }
 
         // Send message to Server
         let mut digest = String::from("");
-        for i in 0..1000 {
+        for i in 0..total_msg {
             if let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080") {
                 let content = Message::generate_random_string();
                 let digest_input = digest + &content;
@@ -46,8 +39,5 @@ mod tests {
             }
         }
 
-        // todo
-        handle_A.join().unwrap();
-        handle_B.join().unwrap();
     }
 }

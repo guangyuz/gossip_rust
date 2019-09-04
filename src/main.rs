@@ -13,12 +13,16 @@ use message::Message;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let address = &args[1];
-    let peers = &args[2];
+    if args.len() < 3 {
+        println!("too few arguments");
+    } else {
+        let address = &args[1];
+        let peers = &args[2];
 
-    // Create a new Server
-    let mut server = Server::new(address);
-    server.join(peers);
-    server.run();
+        // Create a new Server
+        let mut server = Server::new(address);
+        server.join(peers);
+        server.run();
+    }
 }
 

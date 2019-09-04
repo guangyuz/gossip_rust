@@ -1,76 +1,30 @@
-use std::net::{Incoming, SocketAddr, TcpListener, TcpStream, IpAddr};
-use std::io::prelude;
-use std::io::{Read, Write};
-use std::thread;
-use std::time::Duration;
-use std::sync::mpsc::{Sender, Receiver, channel};
+use std::net::SocketAddr;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::error::Error;
 
-use time::*;
 use crate::message::Message;
+use rand::{thread_rng, Rng};
 
-struct Listener {
-    listener: TcpListener,
-    sender: Sender<String>
-}
+extern crate tokio;
+use tokio::io;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::prelude::*;
 
-impl Listener {
-    pub fn new(address: SocketAddr, sender: Sender<String>) -> Listener {
-        let listener = TcpListener::bind(address).unwrap();
-        Listener {
-            listener,
-            sender
-        }
-    }
+extern crate futures;
+use futures::Future;
+use futures::future::*;
+use futures::sync::mpsc::{Sender, Receiver, channel};
 
-    pub fn run(&mut self) {
-        for stream in self.listener.incoming() {
-            match stream {
-                Ok(mut s) => {
-                    let sender = self.sender.clone();
-                    thread::spawn(move || {
-                        let message = Listener::retrieve_message(s);
-                        sender.send(message);
-                    });
-                },
-                Err(e) => println!("Error: {}", e)
-            }
-        }
-    }
-
-    fn retrieve_message(mut stream: TcpStream) -> String {
-        let mut buffer = [0; 256];
-        let n = stream.read(&mut buffer).unwrap();
-        let mut message  = String::from_utf8_lossy(&buffer[0..n]);
-        message.to_string()
-    }
-}
-
+#[derive(Debug)]
 struct Broadcaster {
     receivers: Vec<SocketAddr>,
-    fan_out: u8
 }
 
 impl Broadcaster {
     pub fn new(receivers: Vec<SocketAddr>) -> Broadcaster {
         Broadcaster{
             receivers,
-            fan_out: 3
-        }
-    }
-
-    pub fn broadcast (&self, message: String) {
-        let mut counter = 0;
-        for i in &self.receivers {
-            if counter >= self.fan_out {
-                break;
-            }
-            if let Ok(mut stream) = TcpStream::connect(i) {
-                stream.write(message.as_bytes());
-            } else {
-                println!("Client #{} couldn't connect to server...", i);
-            }
-            counter += 1;
         }
     }
 }
@@ -92,13 +46,23 @@ impl Peer {
 }
 
 #[derive(Debug)]
+pub struct Shared {
+    messages: HashMap<u32, String>,
+    digests: HashMap<u32, String>,
+}
+
+impl Shared {
+    fn new() -> Self {
+        Shared {
+            messages: HashMap::new(),
+            digests: HashMap::new(),
+        }
+    }
+}
+
 pub struct Server {
     address: SocketAddr,
     peers: Vec<Peer>,
-    messages: HashMap<u32, String>,
-    digests: HashMap<u32, String>,
-    sender: Sender<String>,
-    receiver: Receiver<String>
 }
 
 impl Server {
@@ -106,58 +70,120 @@ impl Server {
         let address: SocketAddr = server_details.to_string()
             .parse()
             .expect("Unable to parse socket address");
-        let (sender, receiver) = channel();
         Server {
             address,
             peers: Vec::new(),
-            messages: HashMap::new(),
-            digests: HashMap::new(),
-            sender,
-            receiver
         }
     }
 
-    pub fn run(&mut self) {
+    fn broadcast_task(rx: Receiver<String>, broadcaster: Broadcaster)
+        -> impl Future<Item = (), Error = ()>
+    {
+        rx.filter(|msg| msg.ne("please ignore")).for_each(move |msg| {
+            let target = thread_rng().gen_range(0, broadcaster.receivers.len());
+            let addr = broadcaster.receivers[target];
+            TcpStream::connect(&addr)
+                .and_then(|stream| {
+                    io::write_all(stream, msg.into_bytes())
+                        .then(|result| {
+                            Ok(())
+                        })
+                })
+                .map_err(|err| {
+                    println!("connection error = {:?}", err);
+                })
+        })
+    }
 
-        // Create Listener in new thread
-        let stream_sender = self.sender.clone();
-        let address = self.address;
-        thread::spawn(move || {
-            Listener::new(address, stream_sender).run();
-        });
-
-        let start_time = time::get_time();
-        // Main loop of the server
-        for content in self.receiver.iter() {
-            let mut message: Message = Message::deserialize(content);
-            let mut index = message.nonce;
-            if self.messages.contains_key(&index) {
-                continue; // already exist, do nothing
+    fn generate_cumulative_hash(state: Arc<Mutex<Shared>>, mut index: u32){
+        let mut current = None;
+        let mut last_digest = None;
+        if index == 0 {
+            last_digest = Some(String::from(""));
+            if let Some(v) = state.lock().unwrap().messages.get(&0) {
+                current = Some(String::from(v));
             }
-            // step 1: broadcast the message
-            let broadcast_message = message.clone();
-            let mut receivers = Vec::new();
-            for i in &self.peers {
-                receivers.push(i.address);
+        } else {
+            if let Some(v) = state.lock().unwrap().messages.get(&index) {
+                current = Some(String::from(v));
             }
-            thread::spawn(move || {
-                Broadcaster::new(receivers)
-                    .broadcast(broadcast_message.serialize());
-            });
-
-            // step 2: save the message
-            println!("Server {}, {:?}, message: nonce={}, bytes={}",
-                     self.address, time::get_time() - start_time, index, message.bytes);
-            self.messages.insert(index, message.bytes);
-
-            // step 3: generate cumulative hash for the accepted messages
-            Message::generate_cumulative_hash(&self.messages, &mut self.digests, index);
+            if let Some(v) = state.lock().unwrap().digests.get(&(index - 1)) {
+                last_digest = Some(String::from(v));
+            }
         }
+
+        while last_digest.is_some() && current.is_some() {
+            let digest_input = last_digest.unwrap() + &current.unwrap();
+            let digest = Message::generate_digest(&digest_input);
+            state.lock().unwrap().digests.insert(index, digest.clone());
+            println!("Server generate digest for message: nonce={}, digest={}, {:?}",
+                     index, digest, time::get_time());
+            index += 1;
+            last_digest = Some(digest);
+            current = None;
+            if let Some(v) = state.lock().unwrap().messages.get(&index) {
+                current = Some(String::from(v));
+            }
+        }
+    }
+
+    fn process(socket: TcpStream, tx: Sender<String>, state: Arc<Mutex<Shared>>) {
+        let done = io::read_to_end(socket, vec![])
+            .and_then(move |(_, buf)| {
+                let mut content  = String::from_utf8_lossy(&buf[..]);
+
+                let mut message_to_broadcast = content.to_string().clone();
+                let mut message: Message = Message::deserialize(content.to_string());
+                let mut index = message.nonce;
+
+                if !state.lock().unwrap().messages.contains_key(&index) {
+                    state.lock().unwrap().messages.insert(index, message.bytes);
+                    Server::generate_cumulative_hash( state.clone(), index);
+                } else {
+                    message_to_broadcast = String::from("please ignore");
+                }
+
+                tx.send(message_to_broadcast)
+                    .map_err(|_| io::ErrorKind::Other.into())
+            })
+            .map(|_| println!("write complete"))
+            .map_err(|e| println!("socket error = {:?}", e));
+
+        tokio::spawn(done);
+    }
+
+    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let address = self.address;
+        let peers = &self.peers;
+        let mut receivers = Vec::new();
+        for i in peers {
+            receivers.push(i.address);
+        }
+        tokio::run(lazy(move || {
+            let listener = TcpListener::bind(&address).unwrap();
+            let (tx, rx) = channel(1_024);
+            let state = Arc::new(Mutex::new(Shared::new()));
+
+            let broadcaster = Broadcaster::new(receivers);
+            tokio::spawn(Server::broadcast_task(rx, broadcaster));
+
+            listener.incoming()
+                .map_err(|e| println!("accept failed = {:?}", e))
+                .for_each(move |socket| {
+                    let tx = tx.clone();
+                    Server::process(socket, tx, state.clone());
+                    Ok(())
+                })
+        }));
+        Ok(())
     }
 
     pub fn join(&mut self, address: &String) {
-        let peer = Peer::new(address.to_string());
-        self.peers.push(peer);
+        let addrs: Vec<&str> = address.split(';').collect();
+        for addr in addrs {
+            let peer = Peer::new(addr.to_string());
+            self.peers.push(peer);
+        }
     }
 
 }
