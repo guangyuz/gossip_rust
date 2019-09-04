@@ -47,4 +47,14 @@ impl Message {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
 
+    #[test]
+    fn new_message() {
+        let msg = Message::new(0,"Hello World!".to_string());
+        let digest = Message::generate_digest(&msg.bytes);
+        assert_eq!("7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069".to_string(), digest);
+    }
+}

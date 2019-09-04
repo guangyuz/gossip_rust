@@ -154,7 +154,7 @@ impl Server {
                 tx.send(message_to_broadcast)
                     .map_err(|_| io::ErrorKind::Other.into())
             })
-            .map(|_| println!("write complete"))
+            .map(|_| {/*println!("write complete")*/})
             .map_err(|e| println!("socket error = {:?}", e));
 
         tokio::spawn(done);
@@ -201,4 +201,15 @@ impl Server {
         }
     }
 
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn new_server() {
+        let mut server = Server::new(&"127.0.0.1:8080".to_string());
+        assert_eq!("127.0.0.1".parse(), Ok(server.address.ip()));
+    }
 }
