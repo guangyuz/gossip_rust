@@ -14,7 +14,7 @@ use tokio::prelude::*;
 extern crate futures;
 use futures::Future;
 use futures::future::*;
-use futures::sync::mpsc::{Sender, Receiver, channel};
+use futures::sync::mpsc::{Sender, Receiver, channel, SendError};
 
 #[derive(Debug)]
 struct Broadcaster {
@@ -82,7 +82,7 @@ impl Server {
     fn broadcast_task(rx: Receiver<String>, broadcaster: Broadcaster)
         -> impl Future<Item = (), Error = ()>
     {
-        rx.filter(|msg| msg.ne("please ignore")).for_each(move |msg| {
+        rx.for_each(move |msg| {
             // random select one receiver from peer list
             let target = thread_rng().gen_range(0, broadcaster.receivers.len());
             let addr = broadcaster.receivers[target];
@@ -134,28 +134,38 @@ impl Server {
     }
 
     // task to process received message
-    // sort with nonce(continuous integer), generate cumulative hash for each message
+    // 1.sort with nonce(continuous integer)
+    // 2.send message to broadcast task
+    // 3.generate cumulative hash for each message
     fn process(socket: TcpStream, tx: Sender<String>, state: Arc<Mutex<Shared>>) {
         let done = io::read_to_end(socket, vec![])
             .and_then(move |(_, buf)| {
-                let mut content  = String::from_utf8_lossy(&buf[..]);
+                let mut content = String::from_utf8_lossy(&buf[..]);
 
                 let mut message_to_broadcast = content.to_string().clone();
                 let mut message: Message = Message::deserialize(content.to_string());
                 let mut index = message.nonce;
 
                 if !state.lock().unwrap().messages.contains_key(&index) {
+                    // sorting is implicitly done with HashMap
                     state.lock().unwrap().messages.insert(index, message.bytes);
-                    Server::generate_cumulative_hash( state.clone(), index);
+                    Ok((message_to_broadcast, state, index))
                 } else {
-                    message_to_broadcast = String::from("please ignore");
+                    Err(io::ErrorKind::Other.into())
                 }
-
-                tx.send(message_to_broadcast)
-                    .map_err(|_| io::ErrorKind::Other.into())
             })
-            .map(|_| {/*println!("write complete")*/})
-            .map_err(|e| println!("socket error = {:?}", e));
+            // generate cumulative hash
+            .and_then(move |(message_to_broadcast, state, index)| {
+                Server::generate_cumulative_hash( state.clone(), index);
+                Ok(message_to_broadcast)
+            })
+            .map_err(|_| {})
+            // send msg to broadcast_task through channel
+            .and_then( move |message_to_broadcast| {
+                tx.send(message_to_broadcast)
+                    .and_then(|_| { Ok(()) })
+                    .map_err(|_| {})
+            });
 
         tokio::spawn(done);
     }
