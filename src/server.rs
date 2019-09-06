@@ -104,15 +104,15 @@ impl Server {
     fn generate_cumulative_hash(state: Arc<Mutex<Shared>>, mut index: u32){
         let mut current = None;
         let mut last_digest = None;
+
+        // get message of 'index'
+        if let Some(v) = state.lock().unwrap().messages.get(&index) {
+            current = Some(String::from(v));
+        }
+        // get hash of 'index - 1'
         if index == 0 {
             last_digest = Some(String::from(""));
-            if let Some(v) = state.lock().unwrap().messages.get(&0) {
-                current = Some(String::from(v));
-            }
         } else {
-            if let Some(v) = state.lock().unwrap().messages.get(&index) {
-                current = Some(String::from(v));
-            }
             if let Some(v) = state.lock().unwrap().digests.get(&(index - 1)) {
                 last_digest = Some(String::from(v));
             }
@@ -135,8 +135,8 @@ impl Server {
 
     // task to process received message
     // 1.sort with nonce(continuous integer)
-    // 2.send message to broadcast task
-    // 3.generate cumulative hash for each message
+    // 2.generate cumulative hash for each message
+    // 3.send message to broadcast task
     fn process(socket: TcpStream, tx: Sender<String>, state: Arc<Mutex<Shared>>) {
         let done = io::read_to_end(socket, vec![])
             .and_then(move |(_, buf)| {
@@ -173,7 +173,7 @@ impl Server {
     // Main task of the server
     //
     // message data flow:
-    // run(listener) -> process(sort, hash) -> broadcast_task
+    // listener -> process_tasks(sort, hash) -> broadcast_tasks
     //
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let address = self.address;
@@ -183,10 +183,13 @@ impl Server {
             receivers.push(i.address);
         }
         tokio::run(lazy(move || {
+            // create listener
             let listener = TcpListener::bind(&address).unwrap();
+            // setup channel for communication between process_task and broadcast tasks
             let (tx, rx) = channel(1_024);
+            // create in-memory storage for received message
             let state = Arc::new(Mutex::new(Shared::new()));
-
+            // start broadcast task
             let broadcaster = Broadcaster::new(receivers);
             tokio::spawn(Server::broadcast_task(rx, broadcaster));
 
